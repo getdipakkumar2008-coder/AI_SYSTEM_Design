@@ -40,6 +40,15 @@ public sealed class DevOutputGuardrail : IOutputGuardrail
     }
 }
 
+public sealed class DevEvidenceGuardrail : IEvidenceGuardrail
+{
+    public Task<IReadOnlyList<RetrievedPassage>> ScreenAsync(
+        string userMessage, IReadOnlyList<RetrievedPassage> evidence, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<RetrievedPassage>>(evidence
+            .Where(p => !p.Text.Contains("ignore previous", StringComparison.OrdinalIgnoreCase))
+            .ToList());
+}
+
 public sealed class InMemorySemanticCache : ISemanticCache, ICacheInvalidator
 {
     private readonly ConcurrentDictionary<string, CachedAnswer> _entries = new(StringComparer.OrdinalIgnoreCase);
@@ -53,11 +62,11 @@ public sealed class InMemorySemanticCache : ISemanticCache, ICacheInvalidator
         return Task.CompletedTask;
     }
 
-    public Task InvalidateAsync(string entity, string id, CancellationToken ct)
+    public Task InvalidateAsync(string sourceKey, CancellationToken ct)
     {
         foreach (var (key, entry) in _entries)
         {
-            if (entry.Evidence.Any(e => e.SourceId == id))
+            if (entry.Evidence.Any(e => e.SourceId == sourceKey))
             {
                 _entries.TryRemove(key, out _);
             }
@@ -71,8 +80,8 @@ public sealed class DevRetriever : IRetriever
 {
     private static readonly RetrievedPassage[] Corpus =
     [
-        new("faq-returns", "Returns policy", "Items can be returned within 30 days of delivery in original condition.", IsPublic: true),
-        new("faq-shipping", "Shipping", "Standard shipping takes 3 to 5 business days.", IsPublic: true),
+        new("faq:returns", "Returns policy", "Items can be returned within 30 days of delivery in original condition.", IsPublic: true),
+        new("faq:shipping", "Shipping", "Standard shipping takes 3 to 5 business days.", IsPublic: true),
     ];
 
     public Task<IReadOnlyList<RetrievedPassage>> SearchAsync(string query, UserContext user, int top, CancellationToken ct)

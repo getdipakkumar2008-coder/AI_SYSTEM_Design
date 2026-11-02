@@ -54,6 +54,21 @@ internal sealed class FakeOutputGuardrail : IOutputGuardrail
     }
 }
 
+internal sealed class FakeEvidenceGuardrail : IEvidenceGuardrail
+{
+    public HashSet<string> FlaggedSourceIds { get; } = [];
+
+    public bool Throw { get; set; }
+
+    public Task<IReadOnlyList<RetrievedPassage>> ScreenAsync(
+        string userMessage, IReadOnlyList<RetrievedPassage> evidence, CancellationToken ct)
+    {
+        return Throw
+            ? throw new InvalidOperationException("screening down")
+            : Task.FromResult<IReadOnlyList<RetrievedPassage>>(evidence.Where(p => !FlaggedSourceIds.Contains(p.SourceId)).ToList());
+    }
+}
+
 internal sealed class FakeRetriever : IRetriever
 {
     public List<RetrievedPassage> Passages { get; } = [new("doc1", "Policy", "Returns in 30 days.", IsPublic: true)];
@@ -73,14 +88,19 @@ internal sealed class FakeModelGateway : IModelGateway
 
     public bool Unavailable { get; set; }
 
+    public bool Answerable { get; set; } = true;
+
+    public ModelRequest? LastRequest { get; private set; }
+
     public int Calls { get; private set; }
 
     public Task<ModelResponse> GenerateAsync(ModelRequest request, RequestBudget budget, CancellationToken ct)
     {
         Calls++;
+        LastRequest = request;
         return Unavailable
             ? throw new ModelUnavailableException("down")
-            : Task.FromResult(new ModelResponse("Returns are accepted within 30 days.", ["doc1"], Confidence, "fake", 100));
+            : Task.FromResult(new ModelResponse("Returns are accepted within 30 days.", ["doc1"], Confidence, "fake", 100, Answerable));
     }
 }
 
@@ -112,7 +132,7 @@ internal sealed class ChatHarness
     public ChatHarness()
     {
         Orchestrator = new ChatOrchestrator(
-            Input, Output, Cache, Retriever, Model, Sessions, Escalation, Audit, Clock,
+            Input, Output, Cache, Retriever, Evidence, Model, Sessions, Escalation, Audit, Clock,
             Options.Create(new ChatOptions()), NullLogger<ChatOrchestrator>.Instance);
     }
 
@@ -123,6 +143,8 @@ internal sealed class ChatHarness
     public InMemorySemanticCache Cache { get; } = new();
 
     public FakeRetriever Retriever { get; } = new();
+
+    public FakeEvidenceGuardrail Evidence { get; } = new();
 
     public FakeModelGateway Model { get; } = new();
 

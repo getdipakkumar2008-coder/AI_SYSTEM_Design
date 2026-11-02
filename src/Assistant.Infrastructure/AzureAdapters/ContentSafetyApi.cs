@@ -10,6 +10,8 @@ public sealed class ContentSafetyApi(HttpClient http, TokenCredential credential
 {
     private const string Scope = "https://cognitiveservices.azure.com/.default";
     private const int MaxAnalyzeChars = 10_000;
+    private const int MaxShieldDocuments = 5;
+    private const int MaxShieldChars = 9_000;
     private static readonly string[] HarmCategories = ["Hate", "SelfHarm", "Sexual", "Violence"];
 
     /// <summary>True when Prompt Shields detects a user-prompt attack (jailbreak or injection).</summary>
@@ -21,6 +23,54 @@ public sealed class ContentSafetyApi(HttpClient http, TokenCredential credential
         result.EnsureSuccess("Prompt Shields");
 
         return result.Body.GetProperty("userPromptAnalysis").GetProperty("attackDetected").GetBoolean();
+    }
+
+    /// <summary>
+    /// Screens documents (retrieved passages) for indirect prompt injection. Returns one flag per document, true when an
+    /// attack is detected. Documents are sent in batches within the service limits; a document too long to screen fully
+    /// is reported as flagged (fail closed) rather than partly screened.
+    /// </summary>
+    public async Task<bool[]> DetectDocumentAttacksAsync(string userPrompt, IReadOnlyList<string> documents, CancellationToken ct)
+    {
+        var flags = new bool[documents.Count];
+        var next = 0;
+        while (next < documents.Count)
+        {
+            var batch = new List<int>();
+            var chars = 0;
+            while (next < documents.Count && batch.Count < MaxShieldDocuments)
+            {
+                var length = Math.Min(documents[next].Length, MaxShieldChars);
+                if (batch.Count > 0 && chars + length > MaxShieldChars)
+                {
+                    break;
+                }
+
+                batch.Add(next);
+                chars += length;
+                next++;
+            }
+
+            var payload = batch.Select(i => documents[i].Length > MaxShieldChars ? documents[i][..MaxShieldChars] : documents[i]).ToArray();
+            var result = await AzureRest.PostJsonAsync(
+                http, credential, Scope, "contentsafety/text:shieldPrompt?api-version=2024-09-01",
+                new { userPrompt, documents = payload }, ct).ConfigureAwait(false);
+            result.EnsureSuccess("Prompt Shields (documents)");
+
+            var analysis = result.Body.GetProperty("documentsAnalysis").EnumerateArray()
+                .Select(d => d.GetProperty("attackDetected").GetBoolean()).ToArray();
+            if (analysis.Length != batch.Count)
+            {
+                throw new InvalidOperationException("Prompt Shields returned an unexpected number of document results.");
+            }
+
+            for (var k = 0; k < batch.Count; k++)
+            {
+                flags[batch[k]] = analysis[k] || documents[batch[k]].Length > MaxShieldChars;
+            }
+        }
+
+        return flags;
     }
 
     /// <summary>Highest severity (0, 2, 4 or 6) across hate, self-harm, sexual and violence for the text.</summary>

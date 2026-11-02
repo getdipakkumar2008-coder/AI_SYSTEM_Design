@@ -46,6 +46,8 @@ A chat assistant (web and mobile) that answers shopper questions about products,
 | FR-B7 | The model gateway MUST fail over to a fallback model and record which model served each response. |
 | FR-B8 | The system MUST escalate to a human on: low confidence, user dispute, high-value or high-risk action, repeated failure, or explicit user request. |
 | FR-B9 | An escalation MUST include a handoff package: ticket, conversation context, retrieved evidence, and any proposed action. |
+| FR-B10 | Retrieved passages MUST be screened for indirect prompt injection before they are sent to the model; flagged passages MUST be dropped, and if none remain the request MUST escalate. |
+| FR-B11 | When the model reports the passages do not answer the question, the system MUST escalate rather than return a non-answer. |
 
 ### 3.3 State and data freshness
 | ID | Requirement |
@@ -123,6 +125,6 @@ A chat assistant (web and mobile) that answers shopper questions about products,
 
 | Phase | Exit criteria |
 |---|---|
-| 1. MVP | FR-A1 to A3, A6 to A9, B1 to B3, B6, B7, D1; golden set passes NFR-4 |
+| 1. MVP | FR-A1 to A3, A6 to A9, B1 to B3, B6, B7, B10, B11, D1; golden set passes NFR-4 |
 | 2. Hardened | FR-A4, A5, B4, B5, B8, B9, C1 to C3, D3; red-team passes NFR-5 |
 | 3. Scale | FR-C4 to C6, D2, D4 to D6; load and DR tests pass NFR-1 to NFR-3, NFR-7 |

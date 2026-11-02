@@ -31,7 +31,7 @@ public sealed partial class SourceChangedFunction(
 
         // Index first, then invalidate: a stale cache entry is worse than a briefly missing one.
         await indexer.UpsertAsync(change, ct);
-        await cacheInvalidator.InvalidateAsync(change.Entity, change.Id, ct);
+        await cacheInvalidator.InvalidateAsync(change.SourceKey, ct);
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Processing source change {Entity}/{Id} version {Version}")]

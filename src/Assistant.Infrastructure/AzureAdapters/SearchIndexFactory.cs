@@ -9,6 +9,8 @@ public sealed record VectorizerSettings(Uri OpenAiEndpoint, string EmbeddingDepl
 /// Defines the knowledge index used by <see cref="AzureAiSearchRetriever"/>. Documents are chunks of catalog, FAQ
 /// and policy content. <c>aclGroups</c> carries the Entra group ids allowed to see a chunk; <c>isPublic</c> marks
 /// chunks visible to everyone and eligible for the semantic cache.
+/// <c>sourceId</c> must be the <c>entity:id</c> key of the source record (for example <c>product:42</c>), the same key
+/// change events carry as <c>SourceChange.SourceKey</c>, so cache invalidation can find the answers that used it.
 /// To use vector search, pass <paramref name="vectors"/>, grant the search service identity the
 /// "Cognitive Services OpenAI User" role on the embedding account, populate <c>contentVector</c> at ingestion,
 /// and set <c>Assistant:Azure:SearchUseVectors</c> to true.

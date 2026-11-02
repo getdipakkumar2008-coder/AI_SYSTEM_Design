@@ -61,8 +61,9 @@ Implementation status of the Azure adapters (`Infrastructure/AzureAdapters`, ena
 
 | Port | Adapter | Notes |
 |---|---|---|
-| `IInputGuardrail` | `ContentSafetyInputGuardrail` | Prompt Shields, harm categories, Language PII redaction (REST, managed identity) |
+| `IInputGuardrail` | `ContentSafetyInputGuardrail` | Prompt Shields, harm categories, Language PII redaction (REST, managed identity). The PII API and model version are pinned in options (`2026-05-01`); re-run evaluations before bumping |
 | `IOutputGuardrail` | `ContentSafetyOutputGuardrail` | Citation check, harm categories, PII-leak check against evidence, optional groundedness detection (preview API, off by default) |
+| `IEvidenceGuardrail` | `ContentSafetyEvidenceGuardrail` | Prompt Shields document analysis on retrieved passages; flagged ones are dropped (FR-B10). A passage too long to screen counts as flagged |
 | `IRetriever` | `AzureAiSearchRetriever` | Keyword + semantic ranker; ACL filter built from token groups (`AclFilter`); vector query behind `SearchUseVectors`. Index schema: `SearchIndexFactory` (not yet created by any code) |
 | `IModelGateway` | `AzureOpenAiModelGateway` | Chat completions through APIM; structured JSON output; enforces time and token budget; APIM does retry and failover |
 | `ISessionStore` | `CosmosSessionStore` | Partition key = user id, per-item ttl |
@@ -73,6 +74,11 @@ Implementation status of the Azure adapters (`Infrastructure/AzureAdapters`, ena
 | `IKnowledgeIndexer` | `LoggingKnowledgeIndexer` | **Placeholder**: needs a source-document reader for the commerce data |
 
 Settings live under `Assistant:Azure` (`AzureAdapterOptions`); the Bicep sets them as `Assistant__Azure__*` variables. Model deployment names must be identical on the primary and fallback OpenAI accounts.
+
+Conventions the adapters rely on:
+- `RetrievedPassage.SourceId` and the index `sourceId` field are the `entity:id` key of the source record (for example `product:42`). Change events carry the same key as `SourceChange.SourceKey`, and the cache tags and invalidates by it.
+- The model returns `answerable`; `false` escalates (no grounding) instead of going through the output guardrail.
+- Cache tagging narrows but does not close the race with invalidation: a change between retrieval and tagging is bounded by `CacheTtl`.
 
 Orchestration is a plain code-defined workflow in `ChatOrchestrator`. Add Semantic Kernel or Microsoft Agent Framework only behind `IModelGateway`/tool abstractions, and only with a recorded reason.
 
@@ -119,7 +125,7 @@ These come from the architecture. Never weaken them, even if asked to "simplify"
 
 ```bash
 dotnet build AiAssistant.slnx                 # warnings are errors
-dotnet test AiAssistant.slnx                  # 70 unit tests, all offline
+dotnet test AiAssistant.slnx                  # 94 unit tests, all offline
 dotnet format AiAssistant.slnx --verify-no-changes
 
 # Run the API locally with in-memory dev adapters (appsettings.Development.json sets UseDevAdapters=true).

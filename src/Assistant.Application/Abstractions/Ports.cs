@@ -24,6 +24,16 @@ public interface IOutputGuardrail
         CancellationToken ct);
 }
 
+/// <summary>
+/// Screens retrieved passages for indirect prompt injection before they reach the model (FR-B10).
+/// Returns only the passages that are safe to use; implementations fail closed by throwing.
+/// </summary>
+public interface IEvidenceGuardrail
+{
+    Task<IReadOnlyList<RetrievedPassage>> ScreenAsync(
+        string userMessage, IReadOnlyList<RetrievedPassage> evidence, CancellationToken ct);
+}
+
 public sealed record CachedAnswer(
     DraftAnswer Answer,
     IReadOnlyList<RetrievedPassage> Evidence,
@@ -41,10 +51,15 @@ public interface ISemanticCache
 /// <summary>Invalidates cache entries when source data changes (FR-C2).</summary>
 public interface ICacheInvalidator
 {
-    Task InvalidateAsync(string entity, string id, CancellationToken ct);
+    /// <param name="sourceKey">The <c>entity:id</c> key of the changed source (see <c>SourceChange.SourceKey</c>).</param>
+    Task InvalidateAsync(string sourceKey, CancellationToken ct);
 }
 
-/// <summary>Hybrid search + rerank. Implementations MUST filter by <c>user.Groups</c> before ranking (FR-B1).</summary>
+/// <summary>
+/// Hybrid search + rerank. Implementations MUST filter by <c>user.Groups</c> before ranking (FR-B1).
+/// <see cref="RetrievedPassage.SourceId"/> MUST be the <c>entity:id</c> key of the source record (for example
+/// <c>product:42</c>) so cache invalidation can match it to change events.
+/// </summary>
 public interface IRetriever
 {
     Task<IReadOnlyList<RetrievedPassage>> SearchAsync(string query, UserContext user, int top, CancellationToken ct);
@@ -58,12 +73,15 @@ public sealed record ModelRequest(
     IReadOnlyList<RetrievedPassage> Evidence,
     IReadOnlyList<Turn> History);
 
+/// <param name="Answerable">False when the model says the passages do not contain the answer. That is a
+/// grounding failure to escalate, not an answer to validate.</param>
 public sealed record ModelResponse(
     string Text,
     IReadOnlyList<string> CitedSourceIds,
     double Confidence,
     string ServedBy,
-    int TokensUsed);
+    int TokensUsed,
+    bool Answerable = true);
 
 /// <summary>Model routing, retries, timeouts and primary/fallback failover (FR-B6, FR-B7).</summary>
 public interface IModelGateway

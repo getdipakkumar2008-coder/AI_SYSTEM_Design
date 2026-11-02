@@ -43,6 +43,7 @@ public class AzureWiringTests
         Assert.NotNull(provider.GetRequiredService<ToolInvoker>());
         Assert.IsType<ContentSafetyInputGuardrail>(provider.GetRequiredService<IInputGuardrail>());
         Assert.IsType<ContentSafetyOutputGuardrail>(provider.GetRequiredService<IOutputGuardrail>());
+        Assert.IsType<ContentSafetyEvidenceGuardrail>(provider.GetRequiredService<IEvidenceGuardrail>());
         Assert.IsType<AzureAiSearchRetriever>(provider.GetRequiredService<IRetriever>());
         Assert.IsType<AzureOpenAiModelGateway>(provider.GetRequiredService<IModelGateway>());
         Assert.IsType<CosmosSessionStore>(provider.GetRequiredService<ISessionStore>());

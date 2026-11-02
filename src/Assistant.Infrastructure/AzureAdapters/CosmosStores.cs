@@ -49,9 +49,10 @@ public sealed class CosmosSessionStore(Container container, IOptions<AzureAdapte
 /// Single-use confirmation tokens for write actions (FR-B4). Consumption is made atomic with an ETag precondition:
 /// of two concurrent confirmations, only one replace succeeds and the other gets 412 and is reported as already used.
 /// </summary>
-public sealed class CosmosPendingActionStore(Container container) : IPendingActionStore
+public sealed class CosmosPendingActionStore(Container container, TimeProvider clock) : IPendingActionStore
 {
-    private const int TtlSeconds = 900;
+    private const int TtlMarginSeconds = 300;
+    private const int MinTtlSeconds = 60;
 
     internal sealed record PendingActionDocument(
         string Id, string UserId, string ToolName, string ArgumentsHash, DateTimeOffset ExpiresAt, bool Consumed, int Ttl);
@@ -59,9 +60,14 @@ public sealed class CosmosPendingActionStore(Container container) : IPendingActi
     public async Task SaveAsync(PendingAction action, CancellationToken ct)
     {
         var document = new PendingActionDocument(
-            action.Id, action.UserId, action.ToolName, action.ArgumentsHash, action.ExpiresAt, Consumed: false, TtlSeconds);
+            action.Id, action.UserId, action.ToolName, action.ArgumentsHash, action.ExpiresAt, Consumed: false,
+            TtlFor(action.ExpiresAt, clock.GetUtcNow()));
         await container.CreateItemAsync(document, new PartitionKey(action.UserId), cancellationToken: ct).ConfigureAwait(false);
     }
+
+    /// <summary>Lifetime follows the token's own expiry plus a margin, so a replay is still recognised until it expires.</summary>
+    internal static int TtlFor(DateTimeOffset expiresAt, DateTimeOffset now) =>
+        (int)Math.Max(MinTtlSeconds, Math.Ceiling((expiresAt - now).TotalSeconds) + TtlMarginSeconds);
 
     public async Task<ConfirmationResult> TryConsumeAsync(
         string actionId, string userId, string toolName, string argumentsHash, DateTimeOffset now, CancellationToken ct)
@@ -94,7 +100,7 @@ public sealed class CosmosPendingActionStore(Container container) : IPendingActi
         try
         {
             await container.ReplaceItemAsync(
-                document with { Consumed = true },
+                document with { Consumed = true, Ttl = TtlFor(document.ExpiresAt, now) }, // a replace must not extend the lifetime
                 document.Id,
                 new PartitionKey(userId),
                 new ItemRequestOptions { IfMatchEtag = read.ETag },

@@ -42,11 +42,15 @@ internal sealed class StubHandler : HttpMessageHandler
             await Task.Delay(Timeout.Infinite, cancellationToken);
         }
 
-        var route = _routes.FirstOrDefault(r => request.RequestUri!.ToString().Contains(r.Fragment, StringComparison.Ordinal));
-        if (route.Fragment is null)
+        // Several routes for the same fragment are served in registration order; the last one repeats.
+        var matches = _routes.Where(r => request.RequestUri!.ToString().Contains(r.Fragment, StringComparison.Ordinal)).ToList();
+        if (matches.Count == 0)
         {
             return new HttpResponseMessage(HttpStatusCode.NotFound);
         }
+
+        var calls = Requests.Count(r => r.RequestUri!.ToString().Contains(matches[0].Fragment, StringComparison.Ordinal));
+        var route = matches[Math.Min(calls, matches.Count) - 1];
 
         var response = new HttpResponseMessage(route.Status) { Content = new StringContent(route.Json, Encoding.UTF8, "application/json") };
         foreach (var (name, value) in route.Headers ?? new Dictionary<string, string>())

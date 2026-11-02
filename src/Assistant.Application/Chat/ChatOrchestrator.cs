@@ -17,6 +17,7 @@ public sealed partial class ChatOrchestrator(
     IOutputGuardrail outputGuardrail,
     ISemanticCache cache,
     IRetriever retriever,
+    IEvidenceGuardrail evidenceGuardrail,
     IModelGateway modelGateway,
     ISessionStore sessions,
     IEscalationService escalation,
@@ -91,12 +92,36 @@ public sealed partial class ChatOrchestrator(
                 return await EscalateAsync(request, user, ReasonCodes.NoGrounding, [], evidence, ct).ConfigureAwait(false);
             }
 
-            // 4. Model call through the gateway.
+            // 4. Screen retrieved passages for indirect injection; drop any that are flagged (FR-B10).
+            budget.ConsumeStep();
+            try
+            {
+                evidence = await evidenceGuardrail.ScreenAsync(input.SanitizedMessage, evidence, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                LogGuardrailError(ex, request.RequestId, "evidence");
+                return ChatResponse.Refusal(request.RequestId, ReasonCodes.GuardrailError);
+            }
+
+            if (evidence.Count == 0)
+            {
+                // Flagged passages are not forwarded to the support agent either.
+                return await EscalateAsync(request, user, ReasonCodes.NoGrounding, [], [], ct).ConfigureAwait(false);
+            }
+
+            // 5. Model call through the gateway.
             budget.ConsumeStep();
             var history = await sessions.GetRecentAsync(user.UserId, request.SessionId, _options.HistoryTurns, ct).ConfigureAwait(false);
             var model = await modelGateway.GenerateAsync(
                 new ModelRequest(SystemInstructions, input.SanitizedMessage, evidence, history), budget, ct).ConfigureAwait(false);
             budget.ConsumeTokens(model.TokensUsed);
+
+            if (!model.Answerable)
+            {
+                // The model says the passages do not answer the question: escalate instead of validating a non-answer.
+                return await EscalateAsync(request, user, ReasonCodes.NoGrounding, history, evidence, ct).ConfigureAwait(false);
+            }
 
             if (model.Confidence < _options.ConfidenceThreshold)
             {
@@ -110,14 +135,14 @@ public sealed partial class ChatOrchestrator(
             var usedPersonalData = evidence.Any(p => !p.IsPublic);
             var draft = new DraftAnswer(model.Text, citations, usedPersonalData);
 
-            // 5. Output guardrails on the FULL draft before anything is returned or streamed (FR-A7, FR-A8).
+            // 6. Output guardrails on the FULL draft before anything is returned or streamed (FR-A7, FR-A8).
             var blocked = await ValidateOutputAsync(draft, evidence, user, request.RequestId, ct).ConfigureAwait(false);
             if (blocked is not null)
             {
                 return blocked;
             }
 
-            // 6. Cache write only after validation, and only for public, non-personalized answers (FR-A4).
+            // 7. Cache write only after validation, and only for public, non-personalized answers (FR-A4).
             if (!usedPersonalData)
             {
                 await cache.SetAsync(

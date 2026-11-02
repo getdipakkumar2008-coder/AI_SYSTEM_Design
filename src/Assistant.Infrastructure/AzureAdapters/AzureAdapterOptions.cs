@@ -30,6 +30,12 @@ public sealed class AzureAdapterOptions
 
     public string PiiLanguage { get; set; } = "en";
 
+    /// <summary>Language analyze-text API version (GA at the time of writing).</summary>
+    public string PiiApiVersion { get; set; } = "2026-05-01";
+
+    /// <summary>Pinned PII model version, so redaction behaviour changes only through a reviewed release. Re-run evaluations before bumping.</summary>
+    public string PiiModelVersion { get; set; } = "2026-05-01";
+
     /// <summary>Groundedness detection is a preview API with limited regions, so it is opt-in.</summary>
     public bool GroundednessDetectionEnabled { get; set; }
 

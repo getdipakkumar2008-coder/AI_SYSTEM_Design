@@ -34,7 +34,7 @@ public sealed class RedisConnection(IOptions<AzureAdapterOptions> options, Token
 /// Answer cache for public, validated, non-personalized answers (FR-A4).
 /// This is an exact-match cache on the normalized question. It does not yet do similarity (embedding) matching;
 /// that needs RediSearch vector queries plus an embedding call and is a follow-up.
-/// Entries are tagged with the source ids of their evidence so a CDC event can invalidate them (FR-C2).
+/// Entries are tagged with the <c>entity:id</c> source keys of their evidence so a change event can invalidate them (FR-C2).
 /// </summary>
 public sealed partial class RedisSemanticCache(RedisConnection connection, IOptions<AzureAdapterOptions> options)
     : ISemanticCache, ICacheInvalidator
@@ -47,7 +47,7 @@ public sealed partial class RedisSemanticCache(RedisConnection connection, IOpti
     public async Task<CachedAnswer?> TryGetAsync(string sanitizedMessage, CancellationToken ct)
     {
         var db = await connection.GetDatabaseAsync().ConfigureAwait(false);
-        var value = await db.StringGetAsync(EntryKey(sanitizedMessage)).ConfigureAwait(false);
+        var value = await db.StringGetAsync(EntryKey(sanitizedMessage)).WaitAsync(ct).ConfigureAwait(false);
         return value.IsNullOrEmpty ? null : JsonSerializer.Deserialize<CachedAnswer>((string)value!, Json);
     }
 
@@ -55,33 +55,47 @@ public sealed partial class RedisSemanticCache(RedisConnection connection, IOpti
     {
         var db = await connection.GetDatabaseAsync().ConfigureAwait(false);
         var key = EntryKey(sanitizedMessage);
-        await db.StringSetAsync(key, JsonSerializer.Serialize(entry, Json), _ttl).ConfigureAwait(false);
+        var tags = entry.Evidence.Select(e => TagKey(e.SourceId)).Distinct(StringComparer.Ordinal).ToList();
 
-        foreach (var sourceId in entry.Evidence.Select(e => e.SourceId).Distinct(StringComparer.Ordinal))
+        // Tag first, write second. An invalidation deletes the tag set, so a missing tag after the write means an
+        // invalidation raced us and the entry may be stale.
+        foreach (var tag in tags)
         {
-            var tag = TagKey(sourceId);
-            await db.SetAddAsync(tag, key).ConfigureAwait(false);
-            await db.KeyExpireAsync(tag, _ttl + TagGrace).ConfigureAwait(false);
+            await db.SetAddAsync(tag, key).WaitAsync(ct).ConfigureAwait(false);
+            await db.KeyExpireAsync(tag, _ttl + TagGrace).WaitAsync(ct).ConfigureAwait(false);
         }
+
+        await db.StringSetAsync(key, JsonSerializer.Serialize(entry, Json), _ttl).WaitAsync(ct).ConfigureAwait(false);
+
+        foreach (var tag in tags)
+        {
+            if (!await db.KeyExistsAsync(tag).WaitAsync(ct).ConfigureAwait(false))
+            {
+                await db.KeyDeleteAsync(key).WaitAsync(ct).ConfigureAwait(false);
+                return;
+            }
+        }
+
+        // Remaining gap: a change that lands between retrieval and tagging is not seen here and is bounded by the TTL.
     }
 
-    /// <summary>Removes every cached answer that used the changed source. <paramref name="id"/> is the source id of the passages.</summary>
-    public async Task InvalidateAsync(string entity, string id, CancellationToken ct)
+    /// <summary>Removes every cached answer that used the changed source.</summary>
+    public async Task InvalidateAsync(string sourceKey, CancellationToken ct)
     {
         var db = await connection.GetDatabaseAsync().ConfigureAwait(false);
-        var tag = TagKey(id);
-        var members = await db.SetMembersAsync(tag).ConfigureAwait(false);
+        var tag = TagKey(sourceKey);
+        var members = await db.SetMembersAsync(tag).WaitAsync(ct).ConfigureAwait(false);
         if (members.Length > 0)
         {
-            await db.KeyDeleteAsync(members.Select(m => (RedisKey)(string)m!).ToArray()).ConfigureAwait(false);
+            await db.KeyDeleteAsync(members.Select(m => (RedisKey)(string)m!).ToArray()).WaitAsync(ct).ConfigureAwait(false);
         }
 
-        await db.KeyDeleteAsync(tag).ConfigureAwait(false);
+        await db.KeyDeleteAsync(tag).WaitAsync(ct).ConfigureAwait(false);
     }
 
     internal static string EntryKey(string message) => $"cache:{Hash(Normalize(message))}";
 
-    internal static string TagKey(string sourceId) => $"tag:{sourceId}";
+    internal static string TagKey(string sourceKey) => $"tag:{sourceKey}";
 
     internal static string Normalize(string message) =>
         Whitespace().Replace(message.Trim(), " ").ToLowerInvariant();

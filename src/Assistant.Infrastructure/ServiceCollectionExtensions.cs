@@ -31,6 +31,7 @@ public static class ServiceCollectionExtensions
     {
         services.AddSingleton<IInputGuardrail, DevInputGuardrail>();
         services.AddSingleton<IOutputGuardrail, DevOutputGuardrail>();
+        services.AddSingleton<IEvidenceGuardrail, DevEvidenceGuardrail>();
         services.AddSingleton<InMemorySemanticCache>();
         services.AddSingleton<ISemanticCache>(sp => sp.GetRequiredService<InMemorySemanticCache>());
         services.AddSingleton<ICacheInvalidator>(sp => sp.GetRequiredService<InMemorySemanticCache>());
@@ -58,6 +59,7 @@ public static class ServiceCollectionExtensions
         services.AddHttpClient<IModelGateway, AzureOpenAiModelGateway>((sp, client) => ConfigureClient(client, Options(sp).ModelGatewayUrl));
         services.AddTransient<IInputGuardrail, ContentSafetyInputGuardrail>();
         services.AddTransient<IOutputGuardrail, ContentSafetyOutputGuardrail>();
+        services.AddTransient<IEvidenceGuardrail, ContentSafetyEvidenceGuardrail>();
 
         services.AddSingleton(sp =>
         {
@@ -79,7 +81,8 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IOptions<AzureAdapterOptions>>(),
             sp.GetRequiredService<TimeProvider>()));
         services.AddSingleton<IPendingActionStore>(sp => new CosmosPendingActionStore(
-            sp.GetRequiredService<CosmosClient>().GetContainer(Options(sp).CosmosDatabase, "pendingActions")));
+            sp.GetRequiredService<CosmosClient>().GetContainer(Options(sp).CosmosDatabase, "pendingActions"),
+            sp.GetRequiredService<TimeProvider>()));
 
         services.AddRedisCache();
 
