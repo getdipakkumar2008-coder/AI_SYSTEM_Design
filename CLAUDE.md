@@ -23,7 +23,7 @@ Microsoft Azure and the Microsoft stack. Do not introduce non-Microsoft or non-A
 | Edge / gateway | Azure Front Door + WAF, Azure API Management |
 | Identity | Microsoft Entra ID; Entra External ID for shoppers |
 | LLM | Azure OpenAI in Foundry Models, primary + fallback deployment, via APIM |
-| Orchestration | Semantic Kernel / Microsoft Agent Framework, with a code-defined workflow |
+| Orchestration | Code-defined workflow in `ChatOrchestrator`; Semantic Kernel / Agent Framework optional, behind ports |
 | Retrieval | Azure AI Search (hybrid + semantic ranker, security trimming) |
 | Guardrails | Azure AI Content Safety (Prompt Shields, groundedness), Azure AI Language PII, custom policy code |
 | Cache / sessions | Azure Managed Redis (cache), Cosmos DB (sessions, TTL) |
@@ -36,7 +36,30 @@ Microsoft Azure and the Microsoft stack. Do not introduce non-Microsoft or non-A
 
 Azure rules: managed identity and RBAC everywhere (no keys or connection-string secrets in code); Private Link only, public network access disabled; pin model versions and gate version changes behind evaluations; verify current product names, SDKs, and quotas against Microsoft docs before relying on them, since Azure AI services change frequently.
 
-Project layout, solution names, and exact commands are not yet defined. Propose them to the user before scaffolding.
+## Solution layout
+
+`AiAssistant.slnx` (net10.0, SDK pinned in `global.json`, shared settings and warnings-as-errors in `Directory.Build.props`).
+
+```
+src/
+  Assistant.Domain/          pure types and rules, no dependencies: UserContext, RequestBudget,
+                             PendingAction (single-use confirmation), GuardrailVerdict, DraftAnswer
+  Assistant.Application/     ports (Abstractions/Ports.cs), ChatOrchestrator (request path),
+                             ToolInvoker (read/write tool rules), ingestion contracts
+  Assistant.Infrastructure/  adapters: Dev/ (in-memory, local + tests ONLY), Azure/ (stubs that throw
+                             NotImplementedException), DI registration in ServiceCollectionExtensions
+  Assistant.Api/             ASP.NET Core minimal API: POST /v1/chat, /health/live, /health/ready,
+                             Entra auth, per-user rate limit, OpenTelemetry
+  Assistant.Ingestion/       Azure Functions (isolated worker): Service Bus trigger for CDC events
+tests/Assistant.UnitTests/   xunit; orchestrator, tool invoker, budget, confirmation token tests
+infra/                       Bicep skeleton (see infra/README.md for the TODO list)
+```
+
+Dependency direction: Domain <- Application <- Infrastructure <- Api / Ingestion. Application never references Azure SDKs; add Azure SDK packages only in `Assistant.Infrastructure`.
+
+Implementation status: the request-path skeleton and its guardrail/confirmation rules are implemented and tested against in-memory fakes. The Azure adapters (`Infrastructure/Azure`) are stubs, and `AddAzureAdapters` still uses in-memory placeholders for cache, sessions, pending actions, audit and escalation. Those are not production-safe; do not treat the Azure mode as working until they are replaced.
+
+Orchestration is a plain code-defined workflow in `ChatOrchestrator`. Add Semantic Kernel or Microsoft Agent Framework only behind `IModelGateway`/tool abstractions, and only with a recorded reason.
 
 ## Non-negotiable invariants
 
@@ -79,17 +102,23 @@ These come from the architecture. Never weaken them, even if asked to "simplify"
 
 ## Commands
 
-Not yet defined. Expected shape once the solution exists (confirm and replace with real commands):
+```bash
+dotnet build AiAssistant.slnx                 # warnings are errors
+dotnet test AiAssistant.slnx                  # 30 unit tests
+dotnet format AiAssistant.slnx --verify-no-changes
 
-```
-dotnet build
-dotnet test
-dotnet format --verify-no-changes
-az bicep build --file <infra/main.bicep>
-az deployment group what-if ...
+# Run the API locally with in-memory dev adapters (appsettings.Development.json sets UseDevAdapters=true).
+# Requires AzureAd:TenantId / ClientId in user-secrets or env vars for token validation.
+dotnet run --project src/Assistant.Api
+
+# Infrastructure (Bicep 0.48 compiles and lints clean; not yet deployed)
+az bicep build --file infra/main.bicep --stdout > /dev/null
+az deployment group what-if -g <rg> -p infra/parameters/dev.bicepparam
 ```
 
-Add the eval-suite and local-run commands here and keep them current.
+Windows/Git Bash note: this folder is on a filesystem that does not record ownership, so git needs `-c safe.directory=E:/EdriveCode/AIsystemdesign` (or a one-time `git config --global --add safe.directory`).
+
+The evaluation suite (golden set, red-team) does not exist yet; add its command here when it does.
 
 ## Mermaid diagrams
 

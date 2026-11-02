@@ -1,0 +1,21 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+TestResults/
+*.trx
+coverage/
+
+## Azure Functions local settings (secrets); copy local.settings.json.example instead
+local.settings.json
+
+## Compiled ARM output from Bicep
+infra/**/*.json
+
+## Editor / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

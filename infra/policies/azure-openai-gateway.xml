@@ -1,0 +1,40 @@
+<!--
+  API Management policy for the model gateway (FR-B6, FR-B7). Fronts two Azure OpenAI accounts.
+  Skeleton: review every element against current APIM policy reference before production use.
+-->
+<policies>
+  <inbound>
+    <base />
+    <!-- TODO(security): validate-jwt for the calling workload identity (audience = this gateway's app registration). -->
+    <!-- Coarse per-caller limit. Replace the key with a per-user value forwarded by the orchestrator. -->
+    <rate-limit-by-key calls="120" renewal-period="60" counter-key="@(context.Subscription?.Id ?? context.Request.IpAddress)" />
+    <!-- TODO(cost): per-user token limit, e.g. llm-token-limit / azure-openai-token-limit (verify current policy name). -->
+    <!-- Authenticate to Azure OpenAI with the gateway's managed identity; the app never holds model credentials. -->
+    <authentication-managed-identity resource="https://cognitiveservices.azure.com" client-id="{{gateway-identity-client-id}}" output-token-variable-name="msi-access-token" ignore-error="false" />
+    <set-header name="Authorization" exists-action="override">
+      <value>@("Bearer " + (string)context.Variables["msi-access-token"])</value>
+    </set-header>
+    <set-backend-service backend-id="openai-primary" />
+  </inbound>
+  <backend>
+    <!-- Retry once on throttling or server errors, switching to the fallback deployment on retry. -->
+    <retry condition="@(context.Response != null &amp;&amp; (context.Response.StatusCode == 429 || context.Response.StatusCode &gt;= 500))" count="1" interval="1" first-fast-retry="true">
+      <choose>
+        <when condition="@(context.Response != null &amp;&amp; (context.Response.StatusCode == 429 || context.Response.StatusCode &gt;= 500))">
+          <set-backend-service backend-id="openai-fallback" />
+        </when>
+      </choose>
+      <forward-request buffer-request-body="true" />
+    </retry>
+  </backend>
+  <outbound>
+    <base />
+    <!-- Surface which backend served the call so the orchestrator can record served_by. -->
+    <set-header name="x-served-by" exists-action="override">
+      <value>@(context.Request.Url.Host)</value>
+    </set-header>
+  </outbound>
+  <on-error>
+    <base />
+  </on-error>
+</policies>
