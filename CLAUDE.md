@@ -46,8 +46,8 @@ src/
                              PendingAction (single-use confirmation), GuardrailVerdict, DraftAnswer
   Assistant.Application/     ports (Abstractions/Ports.cs), ChatOrchestrator (request path),
                              ToolInvoker (read/write tool rules), ingestion contracts
-  Assistant.Infrastructure/  adapters: Dev/ (in-memory, local + tests ONLY), Azure/ (stubs that throw
-                             NotImplementedException), DI registration in ServiceCollectionExtensions
+  Assistant.Infrastructure/  adapters: Dev/ (in-memory, local + tests ONLY), AzureAdapters/ (real Azure
+                             adapters, see below), DI registration in ServiceCollectionExtensions
   Assistant.Api/             ASP.NET Core minimal API: POST /v1/chat, /health/live, /health/ready,
                              Entra auth, per-user rate limit, OpenTelemetry
   Assistant.Ingestion/       Azure Functions (isolated worker): Service Bus trigger for CDC events
@@ -57,7 +57,22 @@ infra/                       Bicep skeleton (see infra/README.md for the TODO li
 
 Dependency direction: Domain <- Application <- Infrastructure <- Api / Ingestion. Application never references Azure SDKs; add Azure SDK packages only in `Assistant.Infrastructure`.
 
-Implementation status: the request-path skeleton and its guardrail/confirmation rules are implemented and tested against in-memory fakes. The Azure adapters (`Infrastructure/Azure`) are stubs, and `AddAzureAdapters` still uses in-memory placeholders for cache, sessions, pending actions, audit and escalation. Those are not production-safe; do not treat the Azure mode as working until they are replaced.
+Implementation status of the Azure adapters (`Infrastructure/AzureAdapters`, enabled by `Assistant:UseDevAdapters=false`). **None has been run against live Azure yet**; they are covered by offline tests (stubbed HTTP, DI wiring) only.
+
+| Port | Adapter | Notes |
+|---|---|---|
+| `IInputGuardrail` | `ContentSafetyInputGuardrail` | Prompt Shields, harm categories, Language PII redaction (REST, managed identity) |
+| `IOutputGuardrail` | `ContentSafetyOutputGuardrail` | Citation check, harm categories, PII-leak check against evidence, optional groundedness detection (preview API, off by default) |
+| `IRetriever` | `AzureAiSearchRetriever` | Keyword + semantic ranker; ACL filter built from token groups (`AclFilter`); vector query behind `SearchUseVectors`. Index schema: `SearchIndexFactory` (not yet created by any code) |
+| `IModelGateway` | `AzureOpenAiModelGateway` | Chat completions through APIM; structured JSON output; enforces time and token budget; APIM does retry and failover |
+| `ISessionStore` | `CosmosSessionStore` | Partition key = user id, per-item ttl |
+| `IPendingActionStore` | `CosmosPendingActionStore` | Single-use tokens consumed with an ETag precondition |
+| `ISemanticCache` / `ICacheInvalidator` | `RedisSemanticCache` | **Exact-match** on the normalized question, not similarity matching yet; entries tagged by source id for invalidation |
+| `IEscalationService` | `ServiceBusEscalationService` | Publishes to the `escalations` queue; the helpdesk consumer does not exist yet |
+| `IAuditLog` | `LoggingAuditLog` | **Placeholder**: app log only, not an immutable store |
+| `IKnowledgeIndexer` | `LoggingKnowledgeIndexer` | **Placeholder**: needs a source-document reader for the commerce data |
+
+Settings live under `Assistant:Azure` (`AzureAdapterOptions`); the Bicep sets them as `Assistant__Azure__*` variables. Model deployment names must be identical on the primary and fallback OpenAI accounts.
 
 Orchestration is a plain code-defined workflow in `ChatOrchestrator`. Add Semantic Kernel or Microsoft Agent Framework only behind `IModelGateway`/tool abstractions, and only with a recorded reason.
 
@@ -104,7 +119,7 @@ These come from the architecture. Never weaken them, even if asked to "simplify"
 
 ```bash
 dotnet build AiAssistant.slnx                 # warnings are errors
-dotnet test AiAssistant.slnx                  # 30 unit tests
+dotnet test AiAssistant.slnx                  # 70 unit tests, all offline
 dotnet format AiAssistant.slnx --verify-no-changes
 
 # Run the API locally with in-memory dev adapters (appsettings.Development.json sets UseDevAdapters=true).

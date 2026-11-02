@@ -18,8 +18,8 @@ infra/
     cosmos.bicep              sessions (ttl) + pendingActions containers, Entra data roles, no keys
     redis.bicep               Azure Managed Redis (semantic cache), Entra access, no keys
     search.bicep              Azure AI Search with semantic ranker, Entra only
-    cognitive.bicep           Azure OpenAI (pinned model deployments) or Content Safety
-    servicebus.bicep          Premium namespace + source-changes queue (CDC) with dead-lettering
+    cognitive.bicep           Azure OpenAI (pinned model deployments), Content Safety, or Language (PII)
+    servicebus.bicep          Premium namespace + source-changes (CDC) and escalations queues, dead-lettering
     apim.bicep                API Management AI gateway in front of two OpenAI accounts
     containerapps.bicep       Container Apps environment (VNet-internal) + API app
 ```
@@ -48,8 +48,9 @@ az deployment group create  -g <rg> -p infra/parameters/dev.bicepparam   # deplo
 | Network | NSGs and egress restrictions on both subnets |
 | Ingestion host | Function App hosting for `Assistant.Ingestion` (plan, storage with identity-based connections, VNet integration) |
 | Audit | Immutable audit store (Blob with immutability policy) and Log Analytics retention/export policy |
-| Identity | Entra app registrations (API, gateway audience) are created outside Bicep |
-| Escalation | Dynamics 365 Customer Service / helpdesk integration |
+| Identity | Entra app registrations (API, gateway audience) are created outside Bicep; their ids are the `apiAppClientId` and `gatewayScope` parameters |
+| Search | Index creation (`SearchIndexFactory`) and, for vector search, the search service identity's OpenAI role plus an embedding deployment |
+| Escalation | Consumer of the `escalations` queue that creates the helpdesk ticket (for example Dynamics 365 Customer Service) |
 | Resilience | Zone redundancy, second region, backup and DR settings for production (marked `TODO(prod)`) |
 | Operations | Alert rules, dashboards, Azure Load Testing resource, Defender for Cloud / Purview |
 | CI/CD | Pipeline that builds the images, runs `what-if`, deploys, and canary-shifts Container Apps revisions |

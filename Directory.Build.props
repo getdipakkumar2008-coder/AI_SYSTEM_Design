@@ -8,5 +8,7 @@
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <Deterministic>true</Deterministic>
+    <!-- Cosmos SDK is used with System.Text.Json (UseSystemTextJsonSerializerWithOptions), so Newtonsoft is not required. -->
+    <AzureCosmosDisableNewtonsoftJsonCheck>true</AzureCosmosDisableNewtonsoftJsonCheck>
   </PropertyGroup>
 </Project>

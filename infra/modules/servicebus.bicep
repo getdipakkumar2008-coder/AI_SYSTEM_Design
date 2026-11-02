@@ -32,6 +32,18 @@ resource sourceChanges 'Microsoft.ServiceBus/namespaces/queues@2024-01-01' = {
   }
 }
 
+// Handoff packages for human support (FR-B8, FR-B9). A consumer outside this solution creates the helpdesk ticket.
+resource escalations 'Microsoft.ServiceBus/namespaces/queues@2024-01-01' = {
+  parent: namespace
+  name: 'escalations'
+  properties: {
+    maxDeliveryCount: 10
+    deadLetteringOnMessageExpiration: true
+    lockDuration: 'PT1M'
+    defaultMessageTimeToLive: 'P7D'
+  }
+}
+
 resource roles 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for r in roleAssignments: {
   scope: namespace
   name: guid(namespace.id, r.principalId, r.roleDefinitionId)

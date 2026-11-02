@@ -17,11 +17,17 @@ param namePrefix string = 'aiasst'
 
 param tenantId string = tenant().tenantId
 
-@description('Primary model deployment: { name, model, version, capacity }. Pin the version.')
+@description('Primary model deployment: { name, model, version, capacity }. Pin the version. The deployment name must equal the fallback name, because APIM fails over by backend and the URL carries the deployment name.')
 param primaryModel object
 
 @description('Fallback model deployment: { name, model, version, capacity }. Pin the version.')
 param fallbackModel object
+
+@description('Client id of the Entra app registration that represents this API (created outside Bicep).')
+param apiAppClientId string
+
+@description('Token scope the API uses to call the APIM gateway, for example api://<gateway-app-registration-id>/.default.')
+param gatewayScope string
 
 @allowed(['Developer', 'Premium', 'StandardV2', 'PremiumV2'])
 param apimSku string = 'Developer'
@@ -48,6 +54,7 @@ var roles = {
   cognitiveServicesOpenAiUser: '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'
   cognitiveServicesUser: 'a97b65f3-24c7-4388-baec-2e87135dc908'
   serviceBusDataReceiver: '4f6d3b9b-027b-4f4c-9142-0e5a2a2247e0'
+  serviceBusDataSender: '69a216fc-b8fb-44d8-bc22-1f3c2cd27a39'
 }
 
 module monitoring 'modules/monitoring.bicep' = {
@@ -187,6 +194,22 @@ module contentSafety 'modules/cognitive.bicep' = {
   }
 }
 
+// Azure AI Language: PII detection for the input and output guardrails.
+module language 'modules/cognitive.bicep' = {
+  name: 'language'
+  params: {
+    name: 'lang-${compact}'
+    location: location
+    tags: tags
+    kind: 'TextAnalytics'
+    privateEndpointSubnetId: network.outputs.privateEndpointSubnetId
+    privateDnsZoneIds: [zoneIds.cognitive]
+    roleAssignments: [
+      { principalId: apiIdentity.outputs.principalId, roleDefinitionId: roles.cognitiveServicesUser }
+    ]
+  }
+}
+
 module serviceBus 'modules/servicebus.bicep' = {
   name: 'servicebus'
   params: {
@@ -197,6 +220,7 @@ module serviceBus 'modules/servicebus.bicep' = {
     privateDnsZoneIds: [zoneIds.servicebus]
     roleAssignments: [
       { principalId: ingestionIdentity.outputs.principalId, roleDefinitionId: roles.serviceBusDataReceiver }
+      { principalId: apiIdentity.outputs.principalId, roleDefinitionId: roles.serviceBusDataSender }
     ]
   }
 }
@@ -235,11 +259,17 @@ module containerApps 'modules/containerapps.bicep' = {
       { name: 'ASPNETCORE_URLS', value: 'http://+:8080' }
       { name: 'AZURE_CLIENT_ID', value: apiIdentity.outputs.clientId }
       { name: 'AzureAd__TenantId', value: tenantId }
+      { name: 'AzureAd__ClientId', value: apiAppClientId }
+      { name: 'AzureAd__Audience', value: 'api://${apiAppClientId}' }
       { name: 'Assistant__UseDevAdapters', value: 'false' }
       { name: 'Assistant__Azure__CosmosEndpoint', value: cosmos.outputs.endpoint }
       { name: 'Assistant__Azure__SearchEndpoint', value: search.outputs.endpoint }
       { name: 'Assistant__Azure__ContentSafetyEndpoint', value: contentSafety.outputs.endpoint }
+      { name: 'Assistant__Azure__LanguageEndpoint', value: language.outputs.endpoint }
       { name: 'Assistant__Azure__ModelGatewayUrl', value: apim.outputs.gatewayUrl }
+      { name: 'Assistant__Azure__ModelGatewayScope', value: gatewayScope }
+      { name: 'Assistant__Azure__ModelDeployment', value: primaryModel.name }
+      { name: 'Assistant__Azure__ServiceBusNamespace', value: serviceBus.outputs.fullyQualifiedNamespace }
       { name: 'Assistant__Azure__RedisHost', value: redis.outputs.hostName }
       { name: 'Assistant__Azure__KeyVaultUri', value: keyVault.outputs.uri }
       { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: monitoring.outputs.appInsightsConnectionString }

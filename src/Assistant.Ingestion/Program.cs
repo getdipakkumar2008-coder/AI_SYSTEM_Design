@@ -9,7 +9,7 @@ var builder = FunctionsApplication.CreateBuilder(args);
 builder.Services.AddApplicationInsightsTelemetryWorkerService();
 builder.Services.ConfigureFunctionsApplicationInsights();
 
-// TODO: replace the dev adapters with the AI Search indexer and the Managed Redis cache invalidator.
-builder.Services.AddDevAdapters();
+// Cache invalidation uses Redis; the indexer is a logging placeholder until a source-document reader exists.
+builder.Services.AddAzureIngestionAdapters();
 
 builder.Build().Run();

@@ -1,8 +1,8 @@
 param name string
 param location string
 param tags object
-@description('OpenAI for Azure OpenAI in Foundry Models, ContentSafety for Azure AI Content Safety.')
-@allowed(['OpenAI', 'ContentSafety'])
+@description('OpenAI for Azure OpenAI in Foundry Models, ContentSafety for Azure AI Content Safety, TextAnalytics for Azure AI Language (PII detection).')
+@allowed(['OpenAI', 'ContentSafety', 'TextAnalytics'])
 param kind string
 param privateEndpointSubnetId string
 param privateDnsZoneIds array
